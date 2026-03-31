@@ -1,100 +1,105 @@
 import branca
 import folium
+import pandas as pd
 import streamlit
-from folium.plugins import Geocoder, MousePosition
+from bairros import bairros_coordenadas
+from folium.plugins import Geocoder, OverlappingMarkerSpiderfier, TagFilterButton
 from streamlit_folium import st_folium
 
 # Obs: Os ícones vem do Glyphicons ou do Font Awesome, o Font Awesome precisa de prefix="fa"
 
-m = folium.Map(location=(-21.1388, -44.2588), zoom_start=15, tiles="OpenStreetMap")
+# Lê o CSV e monta o dataframe
+df = pd.read_csv('acoes_extensao_coordenadas.csv')
 
-# Barra de pesquisa
-
-folium.plugins.Geocoder().add_to(m)
-
-# Posição do mouse
-
-MousePosition().add_to(m)
+# Cria o mapa
+m = folium.Map(location=(-21.1311, -44.2588), zoom_start=12, min_zoom=12, tiles="OpenStreetMap")
 
 # Botão de tela cheia
-
 folium.plugins.Fullscreen(
     position="topleft",
     force_separate_button=False,
 ).add_to(m)
 
-# Ajusta o zoom de acordo com o que foi marcado no LayerControl
+# Grupos e Markers
+groups = list(bairros_coordenadas.keys())
 
-folium.FitOverlays().add_to(m)
+for _, acao in df.iterrows():
+    equipe_lista = acao['equipe'].split(",")
 
-# Grupo de markers e LayerControl
+    ods_lista = acao['ods'].split(",")
 
-group = folium.FeatureGroup("group").add_to(m)
+    enderecos_lista = []
+    enderecos = acao['endereco'].split(";")
+    for endereco in enderecos:
+        endereco_split = endereco.split(",")
+        bairro = endereco_split[0]
+        cidade = endereco_split[1]
+        estado = endereco_split[2]
+        if bairro == "":
+            enderecos_lista.append(f"{cidade}, {estado}")
+        else:
+            enderecos_lista.append(f"{bairro}, {cidade}, {estado}")
 
-html = """
-<div style="font-family: Arial, sans-serif; font-size: 14px; max-height: 280px; overflow-y: auto;">
+    html = f"""
+    <div style="font-family: Arial, sans-serif; font-size: 14px; max-height: 280px; overflow-y: auto;">
 
-    <h2 style="color:#2c3e50; margin-bottom:5px;">
-        Observatório da Saúde Coletiva: Cuidando de quem cuida
-    </h2>
+        <h2 style="color:#2c3e50; margin-bottom:5px;">
+            {acao['titulo']}
+        </h2>
 
-    <p><strong>Tipo:</strong>
-        Programa
-    </p>
+        <p><strong>Tipo:</strong>
+            {acao['tipo']}
+        </p>
 
-    <p><strong>Departamento do Proponente:</strong><br>
-        Departamento de Geociências 
-    </p>
+        <p><strong>Departamento do Proponente:</strong><br>
+            {acao['departamento_proponente']}
+        </p>
 
-    <p><strong>Coordenador:</strong><br>
-        Marcio Roberto Toledo
-    </p>
+        <p><strong>Coordenador:</strong><br>
+            {acao['coordenador']}
+        </p>
 
-    <p><strong>Equipe:</strong><br>
-        Marcio Roberto Toledo<br>
-        Cassia Beatriz Batista e Silva<br>
-        Tais de Lacerda Gonçalves<br>
-        Amanda Valiengo<br>
-        Carolina Ribeiro Xavier
-    </p>
+        <p><strong>Equipe:</strong><br>
+            {"<br>".join(equipe_lista)}
+        </p>
 
-    <p><strong>Área Principal:</strong><br>
-        Saúde
-    </p>
+        <p><strong>Área Principal:</strong><br>
+            {acao['area_principal']}
+        </p>
 
-    <p><strong>ODS Relacionados:</strong><br>
-        3 - Saúde e Bem-Estar
-    </p>
+        <p><strong>ODS Relacionados:</strong><br>
+            {"<br>".join(ods_lista)}
+        </p>
 
-    <p><strong>Período de Realização:</strong><br>
-        01/04/2024 a 31/03/2026 
-    </p>
+        <p><strong>Período de Realização:</strong><br>
+            {acao['periodo_realizacao']}
+        </p>
 
-    <p><strong>Local de Realização:</strong><br>
-        Praça Dom Helvécio, Dom Bosco, São João del-Rei, MG
-    </p>
+        <p><strong>Local de Realização:</strong><br>
+            {"<br>".join(enderecos_lista)}
+        </p>
 
-</div>
-"""
+    </div>
+    """
 
-iframe = branca.element.IFrame(html=html, width='500', height='300')
+    iframe = branca.element.IFrame(html=html, width='500', height='300')
+    popup = folium.Popup(iframe, max_width=500)
 
-popup = folium.Popup(iframe, max_width=500)
+    folium.Marker(
+        location=bairros_coordenadas[acao['bairro_grupo']],
+        popup=popup,
+        lazy=True,
+        icon=folium.Icon(icon="university", prefix="fa", color="blue"),
+        tags=[acao['bairro_grupo']]
+    ).add_to(m)
 
-folium.Marker(
-    location=[-21.1388, -44.2588],
-    # tooltip="Observatório da Saúde Coletiva: Cuidando de quem cuida",
-    popup=popup,
-    lazy=True,
-    icon=folium.Icon(icon="university", prefix="fa", color="blue"),
-).add_to(group)
+# OverlappingMarkerSpiderfier
+oms = OverlappingMarkerSpiderfier()
+oms.add_to(m)
 
-folium.LayerControl().add_to(m)
+# TagFilterButton
+TagFilterButton(data=groups, clear_text="Limpar").add_to(m)
 
+# Streamlit
 streamlit.title("Extensão em São João del-Rei")
 st_folium(m, width=700, height=500)
-
-# Plugin GroupedLayerControl?
-# Plugin OverlappingMarkerSpiderfier?
-# Plugin TagFilterButton?
-# Plugin TreeLayerControl?
