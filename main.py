@@ -1,10 +1,23 @@
 import branca
 import folium
 import pandas as pd
-import streamlit
+import streamlit as st
 from bairros import bairros_coordenadas
-from folium.plugins import Geocoder, OverlappingMarkerSpiderfier
+from folium.plugins import Fullscreen, OverlappingMarkerSpiderfier
 from streamlit_folium import st_folium
+
+# Obs: Os ícones vêm do Glyphicons ou do Font Awesome; o Font Awesome precisa de prefix="fa".
+
+CSV_ACOES = "acoes_extensao_coordenadas.csv"
+MAPA_CENTRO = (-21.1311, -44.2588)
+MAPA_ZOOM = 12
+
+# Filtros de colunas com um valor por linha: (rótulo, coluna, placeholder).
+FILTROS_SIMPLES = [
+    ("Bairro", "bairro_grupo", "Selecione um ou mais bairros"),
+    ("Unidade Proponente", "unidade_proponente", "Selecione uma ou mais unidades"),
+    ("Área Principal", "area_principal", "Selecione uma ou mais áreas"),
+]
 
 
 def parse_ods(texto):
@@ -14,95 +27,71 @@ def parse_ods(texto):
     return [ods.strip() for ods in texto.split(";") if ods.strip()]
 
 
-# Obs: Os ícones vem do Glyphicons ou do Font Awesome, o Font Awesome precisa de prefix="fa"
+@st.cache_data
+def carregar_dados():
+    """Lê o CSV das ações de extensão (cacheado entre reruns)."""
+    return pd.read_csv(CSV_ACOES)
 
-# Configuração da página: layout largo para o mapa aproveitar a tela
-streamlit.set_page_config(page_title="Extensão em São João del-Rei", layout="wide")
 
-# Lê o CSV e monta o dataframe
-df = pd.read_csv('acoes_extensao_coordenadas.csv')
+def aplicar_filtros(df):
+    """Desenha os filtros na sidebar e devolve o dataframe filtrado.
 
-streamlit.title("Extensão em São João del-Rei")
+    Convenção: filtro vazio não filtra (mostra tudo). Filtros diferentes
+    combinam com E (todas as condições ao mesmo tempo).
+    """
+    st.sidebar.header("Filtros")
 
-# Filtros do Streamlit
-streamlit.sidebar.header("Filtros")
+    selecoes = {}
+    for label, coluna, placeholder in FILTROS_SIMPLES:
+        selecoes[coluna] = st.sidebar.multiselect(
+            label,
+            options=sorted(df[coluna].dropna().unique(), key=str.lower),
+            placeholder=placeholder,
+        )
 
-bairros_selecionados = streamlit.sidebar.multiselect(
-    "Bairro",
-    options=sorted(df['bairro_grupo'].dropna().unique(), key=str.lower),
-    placeholder="Selecione um ou mais bairros",
-)
+    ods_disponiveis = sorted(
+        {ods for lista in df["ods"].dropna().map(parse_ods) for ods in lista},
+        key=lambda o: int(o.split(" - ")[0]),
+    )
+    ods_selecionados = st.sidebar.multiselect(
+        "ODS",
+        options=ods_disponiveis,
+        placeholder="Selecione um ou mais ODS",
+    )
 
-unidades_selecionadas = streamlit.sidebar.multiselect(
-    "Unidade Proponente",
-    options=sorted(df['unidade_proponente'].dropna().unique(), key=str.lower),
-    placeholder="Selecione uma ou mais unidades",
-)
+    for coluna, escolhidos in selecoes.items():
+        if escolhidos:
+            df = df[df[coluna].isin(escolhidos)]
 
-areas_selecionadas = streamlit.sidebar.multiselect(
-    "Área Principal",
-    options=sorted(df['area_principal'].dropna().unique(), key=str.lower),
-    placeholder="Selecione uma ou mais áreas",
-)
+    if ods_selecionados:
+        selecionados = set(ods_selecionados)
+        df = df[df["ods"].map(lambda t: bool(selecionados & set(parse_ods(t))))]
 
-ods_disponiveis = sorted(
-    {ods for lista in df['ods'].dropna().map(parse_ods) for ods in lista},
-    key=lambda o: int(o.split(" - ")[0]),
-)
-ods_selecionados = streamlit.sidebar.multiselect(
-    "ODS",
-    options=ods_disponiveis,
-    placeholder="Selecione um ou mais ODS",
-)
+    return df
 
-if bairros_selecionados:
-    df = df[df['bairro_grupo'].isin(bairros_selecionados)]
 
-if unidades_selecionadas:
-    df = df[df['unidade_proponente'].isin(unidades_selecionadas)]
-
-if areas_selecionadas:
-    df = df[df['area_principal'].isin(areas_selecionadas)]
-
-if ods_selecionados:
-    selecionados = set(ods_selecionados)
-    df = df[df['ods'].map(lambda t: bool(selecionados & set(parse_ods(t))))]
-
-# Cria o mapa
-m = folium.Map(location=(-21.1311, -44.2588), zoom_start=12, min_zoom=12, tiles="OpenStreetMap")
-
-# Botão de tela cheia
-folium.plugins.Fullscreen(
-    position="topleft",
-    force_separate_button=False,
-).add_to(m)
-
-# Markers
-for _, acao in df.iterrows():
-    equipe_lista = acao['equipe'].split(";")
-
-    ods_lista = parse_ods(acao['ods'])
+def construir_popup(acao):
+    """Monta o HTML do popup de uma ação."""
+    equipe_lista = acao["equipe"].split(";")
+    ods_lista = parse_ods(acao["ods"])
 
     enderecos_lista = []
-    enderecos = acao['endereco'].split(";")
-    for endereco in enderecos:
-        endereco_split = endereco.split(",")
-        bairro = endereco_split[0]
-        cidade = endereco_split[1]
-        estado = endereco_split[2]
+    for endereco in acao["endereco"].split(";"):
+        partes = endereco.split(",")
+        bairro, cidade, estado = partes[0], partes[1], partes[2]
         if bairro == "":
             enderecos_lista.append(f"{cidade}, {estado}")
         else:
             enderecos_lista.append(f"{bairro}, {cidade}, {estado}")
 
-    html = f"""
+    return f"""
     <div style="font-family: Arial, sans-serif; font-size: 14px; max-height: 280px; overflow-y: auto;">
 
         <h2 style="color:#2c3e50; margin-bottom:5px;">
             {acao['titulo']}
         </h2>
 
-        <p><strong>Tipo:</strong>
+        <p><strong>Tipo:</strong><br>
             {acao['tipo']}
         </p>
 
@@ -137,19 +126,35 @@ for _, acao in df.iterrows():
     </div>
     """
 
-    iframe = branca.element.IFrame(html=html, width='500', height='300')
-    popup = folium.Popup(iframe, max_width=500)
 
-    folium.Marker(
-        location=bairros_coordenadas[acao['bairro_grupo']],
-        popup=popup,
-        lazy=True,
-        icon=folium.Icon(icon="university", prefix="fa", color="blue"),
-    ).add_to(m)
+def construir_mapa(df):
+    """Cria o mapa Folium com um marcador por ação."""
+    m = folium.Map(
+        location=MAPA_CENTRO,
+        zoom_start=MAPA_ZOOM,
+        min_zoom=MAPA_ZOOM,
+        tiles="OpenStreetMap",
+    )
 
-# OverlappingMarkerSpiderfier
-oms = OverlappingMarkerSpiderfier()
-oms.add_to(m)
+    Fullscreen(position="topleft", force_separate_button=False).add_to(m)
 
-# Renderiza o mapa
-st_folium(m, use_container_width=True, height=600)
+    for _, acao in df.iterrows():
+        iframe = branca.element.IFrame(html=construir_popup(acao), width="500", height="300")
+        popup = folium.Popup(iframe, max_width=500)
+        folium.Marker(
+            location=bairros_coordenadas[acao["bairro_grupo"]],
+            popup=popup,
+            lazy=True,
+            icon=folium.Icon(icon="university", prefix="fa", color="blue"),
+        ).add_to(m)
+
+    OverlappingMarkerSpiderfier().add_to(m)
+    return m
+
+
+st.set_page_config(page_title="Extensão em São João del-Rei", layout="wide")
+st.title("Extensão em São João del-Rei")
+
+df = carregar_dados()
+df = aplicar_filtros(df)
+st_folium(construir_mapa(df), use_container_width=True, height=600)
