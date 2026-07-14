@@ -21,7 +21,7 @@ URL_SIGAA = "https://www.sig.ufsj.edu.br/sigaa/verTelaLogin.do;jsessionid=808CDC
 header = [
     "titulo",
     "tipo",
-    "departamento_proponente",
+    "unidade_proponente",
     "coordenador",
     "equipe",
     "area_principal",
@@ -93,7 +93,7 @@ with sync_playwright() as p:
         campos_imprimir = {
             "Título:": "titulo",
             "Tipo:": "tipo",
-            "Unidade Proponente:": "departamento_proponente",
+            "Unidade Proponente:": "unidade_proponente",
             "Coordenação:": "coordenador",
             "Área Principal:": "area_principal"
         }
@@ -103,7 +103,7 @@ with sync_playwright() as p:
             td = tr.locator("td")
             acao[chave] = td.inner_text()
 
-        acao["departamento_proponente"] = acao["departamento_proponente"].replace(' /', '')
+        acao["unidade_proponente"] = acao["unidade_proponente"].replace(' /', '')
 
         # Equipe
         equipes = []
@@ -112,7 +112,7 @@ with sync_playwright() as p:
             linha = tbody_linhas.nth(k)
             nome = linha.locator("td").nth(0).inner_text()
             equipes.append(nome)
-        acao["equipe"] = ",".join(equipes)
+        acao["equipe"] = ";".join(equipes)
 
         # ODS
         ods_lista = []
@@ -123,7 +123,7 @@ with sync_playwright() as p:
             descricao = linha.locator("td").nth(1).inner_text()
             ods = numero + " - " + descricao
             ods_lista.append(ods)
-        acao["ods"] = ",".join(ods_lista)
+        acao["ods"] = ";".join(ods_lista)
 
         # Retorna para a página anterior
         page.click("a[href='javascript:history.back();']")
